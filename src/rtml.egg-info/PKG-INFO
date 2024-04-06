@@ -1,0 +1,15 @@
+Metadata-Version: 2.1
+Name: rtml
+Version: 0.0.1
+Summary: A package for ML modeling on Huron data sets
+Author-email: Joseph Gartner <jgartner@hcg.com>
+Project-URL: Homepage, https://github.com/RoundtableAnalytics/mlHelperFunctions
+Project-URL: Issues, https://github.com/RoundtableAnalytics/mlHelperFunctions/issues
+Classifier: Programming Language :: Python :: 3
+Classifier: Operating System :: OS Independent
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+License-File: LICENSE
+
+# mlHelperFunctions
+The purpose of this repo is to house files that serve as function to help generalize our machine learning modeling.

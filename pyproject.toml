@@ -1,0 +1,17 @@
+[project]
+name = "rtml"
+version = "0.0.1"
+authors = [
+  { name="Joseph Gartner", email="jgartner@hcg.com" },
+]
+description = "A package for ML modeling on Huron data sets"
+readme = "README.md"
+requires-python = ">=3.11"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+
+[project.urls]
+Homepage = "https://github.com/RoundtableAnalytics/mlHelperFunctions"
+Issues = "https://github.com/RoundtableAnalytics/mlHelperFunctions/issues"
