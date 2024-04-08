@@ -4,10 +4,12 @@ from pandas import DataFrame
 import numpy as np
 
 class losPipeline:
-    def __init__(self, cnx: MySQLConnection, db:str, patientId:str="PATIENT_ID"):
+    def __init__(self, cnx: MySQLConnection, db:str, patientId:str="PATIENT_ID", cvFolds:int=3, testPercent:float=0.2):
         self.cursor = cnx.cursor()
         self.cursor.execute(f'USE {db}')
         self.patientId = patientId
+        self.cvFolds = cvFolds
+        self.testPercent = testPercent
         self.cleanAdmitSql = '''clean_admits AS (
                     SELECT *, DATEDIFF(DISCHARGE_TIME, ADMIT_TIME) AS LOS
                     FROM encounters
@@ -16,10 +18,38 @@ class losPipeline:
                     AND DISCHARGE_TIME IS NOT NULL
                 )'''
 
+    def getTrainingDatasets(self, trainIndex:list, verbose:bool=False):
+        if len(trainIndex)==0:
+            raise Exception("Must provide at least one training index")
+        if verbose:
+            print("Preparing DataFrame")
+        df = self.getOutcome()
+        df = df.join(self.getPastUtil())
+        self.createSplits()
+        self.trainEncounterClassEncoding(trainIndex=trainIndex)
+        df = df.join(pipe.getEncounterClassFeature())
+        if verbose:
+            print("Splitting Dataframe into train & test sets")
+        xss = [self.trainIds[y] for y in trainIndex]
+        train = df.loc[[x for xs in xss for x in xs]]
+
+        iss = set([x for x in range(self.cvFolds)]).difference(trainIndex)
+        if len(iss)==0:
+            if verbose:
+                print("All folds selected for training, test data will be withheld test set")
+            test = df.loc[pipe.testIds]
+        else:
+            if verbose:
+                print(f"Tests will use hold out folds: {iss}")
+            xss = [self.trainIds[y] for y in iss]
+            test = df.loc[[x for xs in xss for x in xs]]
+        return train, test
+
+
     def getFilteredAdmitSql(self, id_list:list):
         return self.cleanAdmitSql[:-1]+'\tAND PATIENT_ID IN ("' + '", "'.join(id_list) + '")\n\t\t)'
 
-    def createSplits(self, q: str=None, inPlace:bool=True, testPercent:float=0.2, validationFolds:int=3):
+    def createSplits(self, q: str=None, inPlace:bool=True):
         '''
         trainTestValidationSplits:
             Creates lists of patient IDs for tests (a single list) and training (broken into roughly equal lists for each validation fold).
@@ -39,14 +69,14 @@ class losPipeline:
         df = dfq(q, self.cursor)
         df['hash'] = df[self.patientId].map(lambda x: patientIdToFloat(x))
 
-        test_ids = df[df['hash']>=(1-testPercent)][self.patientId].to_list()
-        train_ids = [df[(df['hash']<((testPercent/validationFolds)*(1+x)))&(df['hash']>=(testPercent/validationFolds)*x)][self.patientId].to_list() for x in range(validationFolds)]
+        testIds = df[df['hash']>=(1-self.testPercent)][self.patientId].to_list()
+        trainIds = [df[(df['hash']<((self.testPercent/self.cvFolds)*(1+x)))&(df['hash']>=(self.testPercent/self.cvFolds)*x)][self.patientId].to_list() for x in range(self.cvFolds)]
         if inPlace:
-            self.test_ids = test_ids
-            self.train_ids = train_ids
+            self.testIds = testIds
+            self.trainIds = trainIds
             return None
         else:
-            return (test_ids, train_ids)
+            return (testIds, trainIds)
 
     def getOutcome(self, q:str=None, max_days:int=40)->DataFrame:
         '''
@@ -122,15 +152,15 @@ class losPipeline:
                 '''
         return dfq(q, self.cursor).set_index(['PATIENT_ID', 'ADMIT_TIME'])
 
-    def trainEncounterClassEncoding(self, train_index:list, q:str=None, thresh:int=30):
+    def trainEncounterClassEncoding(self, trainIndex:list, q:str=None, thresh:int=30):
         '''
         TODO
         '''
         if not q:
-            xss = [self.train_ids[y] for y in train_index]
-            id_list = [x for xs in xss for x in xs]
+            xss = [self.trainIds[y] for y in trainIndex]
+            idList = [x for xs in xss for x in xs]
             q = f'''
-                WITH {self.getFilteredAdmitSql(id_list)},
+                WITH {self.getFilteredAdmitSql(idList)},
                 fill_nulls AS (
                     SELECT COALESCE(HOSP_SERVICE, "") AS HOSP_SERVICE, LOS
                     FROM clean_admits
@@ -172,7 +202,7 @@ class losPipeline:
 
         switch = switch + tabs + f"\tELSE {df.loc[0].mean_LOS}\n"
         switch = switch + tabs + "END AS mean_service_los"
-        self.hos_service_switch = switch
+        self.hosServiceSwitch = switch
 
     def getEncounterClassFeature(self, q:str=None,):
         '''
@@ -184,7 +214,7 @@ class losPipeline:
                 SELECT 
                     PATIENT_ID, 
                     ADMIT_TIME,
-                    {self.hos_service_switch}
+                    {self.hosServiceSwitch}
                 FROM clean_admits 
                 '''
         df = dfq(q, self.cursor).set_index(['PATIENT_ID', 'ADMIT_TIME'])
