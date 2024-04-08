@@ -3,7 +3,7 @@ from mysql.connector.connection import MySQLConnection
 from pandas import DataFrame
 import numpy as np
 
-class losPipeline:
+class LosPipeline:
     def __init__(self, cnx: MySQLConnection, db:str, patientId:str="PATIENT_ID", cvFolds:int=3, testPercent:float=0.2):
         self.cursor = cnx.cursor()
         self.cursor.execute(f'USE {db}')
@@ -17,6 +17,8 @@ class losPipeline:
                     AND ADMIT_TIME IS NOT NULL
                     AND DISCHARGE_TIME IS NOT NULL
                 )'''
+        # Ensure hashes are constant for a given pipeline
+        self.createSplits()
 
     def getTrainingDatasets(self, trainIndex:list, verbose:bool=False):
         if len(trainIndex)==0:
@@ -25,9 +27,8 @@ class losPipeline:
             print("Preparing DataFrame")
         df = self.getOutcome()
         df = df.join(self.getPastUtil())
-        self.createSplits()
         self.trainEncounterClassEncoding(trainIndex=trainIndex)
-        df = df.join(pipe.getEncounterClassFeature())
+        df = df.join(self.getEncounterClassFeature())
         if verbose:
             print("Splitting Dataframe into train & test sets")
         xss = [self.trainIds[y] for y in trainIndex]
@@ -37,7 +38,7 @@ class losPipeline:
         if len(iss)==0:
             if verbose:
                 print("All folds selected for training, test data will be withheld test set")
-            test = df.loc[pipe.testIds]
+            test = df.loc[self.testIds]
         else:
             if verbose:
                 print(f"Tests will use hold out folds: {iss}")
