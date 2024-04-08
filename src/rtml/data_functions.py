@@ -18,5 +18,5 @@ def dfq(q: str, cur: MySQLCursor) -> DataFrame:
     data = [{x[0]:x[1] for x in zip(cols, r)} for r in res]
     return pd.DataFrame(data)
 
-def patientId_to_float(s, encoding="utf-8"):
+def patientIdToFloat(s, encoding="utf-8"):
     return float(crc32(s.encode(encoding)) & 0xffffffff) / 2**32

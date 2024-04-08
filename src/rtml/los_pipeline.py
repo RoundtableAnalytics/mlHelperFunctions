@@ -16,7 +16,10 @@ class losPipeline:
                     AND DISCHARGE_TIME IS NOT NULL
                 )'''
 
-    def trainTestValidationSplits(self, q: str=None, inPlace:bool=True, testPercent:float=0.2, validationFolds:int=3):
+    def getFilteredAdmitSql(self, id_list:list):
+        return self.cleanAdmitSql[:-1]+'\tAND PATIENT_ID IN ("' + '", "'.join(id_list) + '")\n\t\t)'
+
+    def createSplits(self, q: str=None, inPlace:bool=True, testPercent:float=0.2, validationFolds:int=3):
         '''
         trainTestValidationSplits:
             Creates lists of patient IDs for tests (a single list) and training (broken into roughly equal lists for each validation fold).
@@ -111,7 +114,7 @@ class losPipeline:
                     a.ADMIT_TIME,
                     COALESCE(p.Number_Admissions{suffix}, 0) AS Number_Admissions{suffix},
                     COALESCE(p.Number_Admission_Types{suffix}, 0) AS Number_Admission_Types{suffix},
-                    COALESCE(p.Inpatient_Days{suffix}, 0) AS Inpatient_Days_1Y
+                    COALESCE(CAST(p.Inpatient_Days{suffix} AS SIGNED), 0) AS Inpatient_Days_1Y
                 FROM clean_admits a
                 LEFT JOIN prev_admits p
                 ON a.PATIENT_ID=p.PATIENT_ID AND a.ADMIT_TIME=p.ADMIT_TIME   
@@ -119,4 +122,74 @@ class losPipeline:
                 '''
         return dfq(q, self.cursor).set_index(['PATIENT_ID', 'ADMIT_TIME'])
 
-    # def getEncounterClass(self, q:str=None, )
+    def trainEncounterClassEncoding(self, train_index:list, q:str=None, thresh:int=30):
+        '''
+        TODO
+        '''
+        if not q:
+            xss = [self.train_ids[y] for y in train_index]
+            id_list = [x for xs in xss for x in xs]
+            q = f'''
+                WITH {self.getFilteredAdmitSql(id_list)},
+                fill_nulls AS (
+                    SELECT COALESCE(HOSP_SERVICE, "") AS HOSP_SERVICE, LOS
+                    FROM clean_admits
+                ),
+                grouped_service AS (
+                    SELECT HOSP_SERVICE, COUNT(*) AS Count, AVG(LOS) AS mean_LOS
+                    FROM fill_nulls
+                    GROUP BY HOSP_SERVICE
+                ),
+                others AS (
+                    SELECT 'Other' AS HOSP_SERVICE, LOS
+                    FROM clean_admits l
+                    INNER JOIN grouped_service r
+                    ON l.HOSP_SERVICE = r.HOSP_SERVICE
+                    WHERE r.Count <= {thresh}
+                ),
+                grouped_others AS (
+                    SELECT HOSP_SERVICE, COUNT(*) AS Count, AVG(LOS) AS mean_LOS
+                    FROM others
+                    GROUP BY HOSP_SERVICE
+                )
+                SELECT HOSP_SERVICE, mean_LOS
+                FROM grouped_others
+                UNION
+                SELECT CONVERT(HOSP_SERVICE USING utf8), mean_LOS
+                FROM grouped_service
+                WHERE Count > {thresh}
+                
+            '''
+        df = dfq(q, self.cursor)
+        tabs = "\t\t\t\t\t"
+        switch = tabs + "CASE\n"
+        for i, line in df.loc[1:].iterrows():
+            if line.HOSP_SERVICE == "":
+                switch = switch + tabs + f'\tWHEN (HOSP_SERVICE IS NULL) OR (HOSP_SERVICE = "") THEN {line.mean_LOS}\n'
+            else:
+                switch = switch + tabs + f'\tWHEN HOSP_SERVICE = "{line.HOSP_SERVICE}" THEN {line.mean_LOS}\n'
+            # print(line.HOSP_SERVICE, line.mean_LOS)
+
+        switch = switch + tabs + f"\tELSE {df.loc[0].mean_LOS}\n"
+        switch = switch + tabs + "END AS mean_service_los"
+        self.hos_service_switch = switch
+
+    def getEncounterClassFeature(self, q:str=None,):
+        '''
+        TODO
+        '''
+        if not q:
+            q = f'''
+                WITH {self.cleanAdmitSql} 
+                SELECT 
+                    PATIENT_ID, 
+                    ADMIT_TIME,
+                    {self.hos_service_switch}
+                FROM clean_admits 
+                '''
+        df = dfq(q, self.cursor).set_index(['PATIENT_ID', 'ADMIT_TIME'])
+        df['mean_service_los'] = df['mean_service_los'].astype(float)
+        return df
+
+        
+        
