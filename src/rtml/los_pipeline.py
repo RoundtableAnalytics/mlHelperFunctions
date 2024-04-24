@@ -16,6 +16,7 @@ class LosPipeline:
                     WHERE PAT_CLASS = "Inpatient"
                     AND ADMIT_TIME IS NOT NULL
                     AND DISCHARGE_TIME IS NOT NULL
+                    ORDER BY PATIENT_ID, ADMIT_TIME
                 )'''
         # Ensure hashes are constant for a given pipeline
         self.createSplits()
@@ -26,9 +27,16 @@ class LosPipeline:
         if verbose:
             print("Preparing DataFrame")
         df = self.getOutcome()
+        if verbose:
+            print(f"{df.shape[0]} outcomes calculated for dataset.")
+            print(f"Mean value for outcome = {np.mean(df[df.columns[0]])}")
+            print("\nGetting Utilization data")
         df = df.join(self.getPastUtil())
+        if verbose:
+            print("Calculating Encounter type feature")
         self.trainEncounterClassEncoding(trainIndex=trainIndex)
         df = df.join(self.getEncounterClassFeature())
+        self.featureNames = df.columns.to_list()[1:]
         if verbose:
             print("Splitting Dataframe into train & test sets")
         xss = [self.trainIds[y] for y in trainIndex]
